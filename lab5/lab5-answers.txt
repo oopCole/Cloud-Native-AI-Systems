@@ -1,0 +1,40 @@
+System Understanding
+
+- which file determines what is rendered at http://localhost:3000?
+  - `lab5/lab5-frontend/app/page.tsx` (the app router root page).
+
+- why does the browser call /api/summarize instead of the FastAPI backend directly?
+  - so the frontend can call a same-origin endpoint, avoid CORS issues, and keep backend auth details (the dev JWT) on the server side while the route handler proxies the request to FastAPI.
+
+- where is the JWT token stored, and where is it allowed to be used?
+  - it’s stored server-side (in the Next.js API/route handler code or environment), and it’s only meant to be used by that server-side handler when calling the FastAPI backend (not from browser/client code).
+
+
+Agent Control
+
+- what constraints belonged in agents.md rather than the task prompt?
+  - stable “always follow” rules like “don’t edit other labs”, “don’t change application logic”, “browser must call /api/summarize”, “keep tokens server-side”, code-style rules, and the exact required file paths for the lab.
+
+- why was agents.md not repeated verbatim in every agent prompt?
+  - the agent already had the constraints loaded as persistent guidance; repeating it wastes context window and increases the chance of drift from the single source of truth.
+
+- what would happen if the agent modified files outside those you allowed?
+  - it would violate the lab contract, risk breaking earlier labs, and could cause grading/acceptance checks to fail even if the new feature “works”.
+
+
+Debugging and Contracts
+
+- what caused the “no summary displayed” bug in Step 3?
+  - the UI hook expected a plain-text completion response, but the server endpoint returned JSON (or otherwise returned a response shape/content-type that didn’t match what `useCompletion()` reads into `completion`).
+
+- how did inspecting the request/response boundary reveal the issue?
+  - checking the network request showed the request was reaching the endpoint, but the response body/content-type didn’t match the client’s expectations, so `completion` never populated even though the backend call succeeded.
+
+- why did returning plain text instead of JSON fix the problem?
+  - `useCompletion()` consumes the response body as text (often streamed) to build the completion; returning raw text made the client parse path match the server contract, so the completion string updated and rendered.
+
+
+Reflection (3–5 sentences)
+
+the biggest time sink came from assuming the client and server agreed on the response contract (json vs plain text) just because both “returned a summary”. next time i’d encode the assumption explicitly as: “the `/api/summarize` handler must return `text/plain` (or the exact format required by `useCompletion`) and the UI must target the same route.” i’d also add a quick “contract check” step: verify endpoint path, method, status code, and response content-type in the browser network tab before debugging deeper logic.
+
