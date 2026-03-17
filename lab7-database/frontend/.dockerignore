@@ -1,0 +1,12 @@
+.git
+.github
+.cursor
+.vscode
+
+node_modules
+.next
+.turbo
+dist
+build
+
+.env*
