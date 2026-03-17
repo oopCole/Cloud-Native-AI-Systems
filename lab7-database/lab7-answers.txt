@@ -1,0 +1,59 @@
+State and Persistence
+
+1) what does it mean for this application to be stateful after this lab? what new state exists now that did not exist before?
+- the system now keeps durable state across requests: a history of summarization results (inputs, outputs, metadata) stored in a database, instead of being ephemeral in memory/logs only.
+
+2) where does the persisted state live? identify the specific container/service responsible for storing it.
+- in the PostgreSQL service container (`db`) defined in `lab7-database/docker-compose.yml`, with its data stored under the named docker volume `pgdata`.
+
+3) why does the backend container restarting not delete previously stored summaries?
+- the backend is stateless; summaries are stored in Postgres on the `pgdata` volume, which is not removed when the backend container restarts.
+
+
+Docker Compose and Networking
+
+1) when you run docker compose up, what causes the PostgreSQL container to be created and started?
+- the `db` service definition in `docker-compose.yml` tells compose to create and start a Postgres container (pulling `postgres:16-alpine` if needed).
+
+2) why must the backend connect to PostgreSQL using the compose service name (e.g., db) instead of localhost?
+- inside the backend container, `localhost` refers to the backend container itself; `db` resolves via compose’s internal DNS to the Postgres container on the shared compose network.
+
+3) what is the purpose of the docker volume attached to the PostgreSQL container?
+- it persists the database files across container recreation/restarts, so data (rows, indexes) survives `docker compose down/up` unless the volume is deleted.
+
+
+Schema and Initialization
+
+1) at what point is the summaries table created in your system? describe the mechanism.
+- on first initialization of the Postgres data directory: the SQL file mounted into `/docker-entrypoint-initdb.d/` runs automatically, creating the `summaries` table and index.
+
+2) what is the most direct way to verify that the summaries table exists?
+- connect with `psql` and run `\dt` or query `information_schema.tables` / `SELECT * FROM summaries LIMIT 1;` (or `SELECT to_regclass('public.summaries');`).
+
+
+Backend and SQL Execution
+
+1) when /summarize is called, what SQL operation must occur to persist the result?
+- an `INSERT` into the `summaries` table (one row per request).
+
+2) what data from the summarization request is stored in the database row? list at least five fields.
+- input_text
+- summary_text
+- created_at (timestamp)
+- model
+- prompt_tokens
+- completion_tokens
+- total_tokens
+
+
+API Behavior and Verification
+
+1) why does the frontend not need to change to verify this lab?
+- persistence happens entirely in the backend; the frontend can keep calling `/summarize` the same way and the backend will write rows to Postgres and expose `/summaries` for verification.
+
+2) how can you call GET /summaries without changing the frontend?
+- use the FastAPI docs UI at `http://localhost:8000/docs` or `curl`/Postman with `Authorization: Bearer dev-token`.
+
+3) what ordering should /summaries return results in, and why?
+- newest-first (descending `created_at`, tie-break by `id`), so “recent summaries” show the latest requests at the top and pagination/limits behave predictably.
+
