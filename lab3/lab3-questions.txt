@@ -1,0 +1,43 @@
+• What does await do when waiting on an I/O operation?
+
+  await pauses the current coroutine until the awaited operation (e.g. a network
+  request) finishes. It does not block the whole program: the event loop can run
+  other coroutines while this one is waiting. So one task waiting on I/O lets
+  others run, which is what makes async I/O efficient.
+
+
+• Why does asyncio.gather improve throughput for network-bound tasks?
+
+  gather runs many coroutines concurrently. While one request is waiting on the
+  network, others can be started or processed. The CPU spends little time on
+  each task; most time is spent waiting on I/O. By overlapping those waits
+  instead of doing one request after another, you use the same time to complete
+  more requests, so throughput goes up.
+
+
+• What is an "in-flight" request?
+
+  An in-flight request is one that has been sent but not yet completed—you're
+  still waiting for the response. Limiting in-flight requests (e.g. with a
+  semaphore) caps how many are outstanding at once, which helps avoid
+  overloading the server or hitting rate limits while still doing work
+  concurrently.
+
+
+• Why are retries appropriate for HTTP 429 and 5xx errors but not most 4xx errors?
+
+  429 (rate limit) and 5xx (server error) are usually temporary: the server or
+  your quota may be fine again shortly, so retrying after a delay often
+  succeeds. Most 4xx errors (e.g. 400 bad request, 401 unauthorized, 404 not
+  found) mean the request is invalid or not allowed; sending the same request
+  again won’t fix that, so retrying is pointless and can make things worse
+  (e.g. repeated invalid requests).
+
+
+• Why should Python dependencies be isolated using a virtual environment?
+
+  A virtual environment gives each project its own set of installed packages and
+  versions. That avoids conflicts between projects (e.g. one needs Django 3,
+  another Django 4) and keeps the system Python clean. You can reproduce the
+  same environment later (e.g. with a requirements file) and avoid "works on my
+  machine" issues when sharing or deploying the project.
