@@ -1,0 +1,177 @@
+Coding-Agent–Driven Development
+
+• What role does agents.md play in this lab?
+
+  agents.md is the single source of truth for the API contract and auth rules. It tells
+  the coding agent (and humans) what the backend must do: endpoints, request/response
+  shapes, and authentication behavior. The agent implements to that spec, so agents.md
+  acts as the "requirements document" that keeps implementation aligned and allows
+  incremental, step-by-step development.
+
+
+• Why did we build agents.md incrementally instead of writing all instructions at once?
+
+  Writing it incrementally lets you lock in one slice of behavior (e.g. schema, then
+  auth) and have the agent implement and test that before adding the next. You avoid
+  overwhelming the agent with a huge spec, reduce conflicting or vague instructions,
+  and you can adjust the next steps based on what you learned from the previous ones.
+
+
+• What kinds of mistakes can occur if you let a coding agent implement too much at once?
+
+  The agent may skip steps, mix concerns (e.g. auth and business logic tangled), or
+  make wrong assumptions to "finish" quickly. You get harder-to-debug failures, tests
+  that don't match behavior, or security/contract gaps. Smaller steps make it easier
+  to review, test, and correct one thing at a time.
+
+
+API Design and Structure
+
+• What is the purpose of defining request and response schemas before implementing
+  endpoint logic?
+
+  Schemas (e.g. Pydantic SummarizeRequest / SummarizeResponse) fix the API contract
+  up front. They give automatic validation, clear docs (OpenAPI), and a stable shape
+  for clients and tests. Implementing logic after the contract is defined keeps the
+  endpoint consistent and prevents drift between "what we said" and "what we built."
+
+
+• Why is validation handled at the API boundary rather than inside the summarization
+  logic?
+
+  The API boundary is the single place where input enters the system. Validating there
+  (e.g. non-empty text, positive max_length) means invalid requests are rejected
+  early with 422 and a clear message, and the summarization code can assume it always
+  receives valid data. That keeps business logic simple and avoids scattering
+  validation inside the function.
+
+
+• What does the /health endpoint provide, and why was it implemented first?
+
+  /health returns a simple success response (e.g. {"status": "ok"}) so callers can
+  check that the service is up and responding. It was implemented first to confirm
+  the skeleton (FastAPI, uvicorn, routing) works before adding real endpoints, and
+  it stays unauthenticated so load balancers and monitors can hit it without a token.
+
+
+Configuration and Environment Management
+
+• Why are the OpenRouter API key and model name stored in a .env file?
+
+  They are secrets and environment-specific. The .env file keeps them out of source
+  code and lets you change them per environment (dev, prod) without editing code.
+  The app reads them at startup so the same codebase can run with different keys and
+  models.
+
+
+• What role does python-dotenv play in the application?
+
+  python-dotenv loads variables from a .env file into the process environment (e.g.
+  os.environ) when the app starts. The app then reads OPENROUTER_API_KEY and
+  OPENROUTER_MODEL via os.getenv (or a config module that uses it). That way the app
+  can use .env without you having to export variables manually in the shell.
+
+
+• Why should the .env file never be committed to GitHub?
+
+  .env often contains secrets (API keys, tokens). Committing it would put those
+  secrets in repo history, expose them to anyone with access to the repo, and risk
+  abuse (e.g. someone using your OpenRouter key). .gitignore is used so .env stays
+  local and is never pushed.
+
+
+Authentication
+
+• How is authentication enforced for the API in this lab?
+
+  A dependency (e.g. require_auth) runs before the handler for POST /summarize. It
+  reads the Authorization header, checks that it is "Bearer <token>", and compares
+  the token to a hard-coded dev token (e.g. "dev-token"). If the header is missing
+  or the token is wrong, the dependency raises HTTP 401 with a clear JSON detail;
+  otherwise the request continues to the endpoint logic.
+
+
+• Why is /health excluded from authentication?
+
+  /health is used by monitors and load balancers to see if the service is alive. Those
+  callers often don't have (or shouldn't need) an API token. Excluding /health from
+  auth keeps health checks simple and avoids false "down" signals when the service
+  is fine but the checker doesn't have a token.
+
+
+• What happens when a request is sent without a valid token?
+
+  The auth dependency runs before the handler. If the Authorization header is missing
+  or the token is invalid, it raises HTTP 401 Unauthorized. The response body is JSON
+  with a "detail" message (e.g. "Missing or invalid Authorization header" or "Invalid
+  token"). The summarization logic is not run; the request is rejected at the auth
+  step.
+
+
+Testing and Reliability
+
+• Why do we mock the OpenRouter API in unit tests?
+
+  So tests don't depend on the real API: no network, no API key, no rate limits, and
+  no non-determinism from the model. We control the "response" and assert that our
+  code maps it correctly to the API contract (summary, model, truncated). Tests stay
+  fast, repeatable, and safe to run in CI.
+
+
+• What is the difference between testing placeholder logic and testing AI-backed logic?
+
+  Placeholder logic is deterministic (e.g. "first N words"); you can assert exact
+  output for a given input. AI-backed logic returns different text each time and
+  depends on an external service. For AI-backed logic we mock the external call and
+  test that we parse the response and apply our rules (e.g. truncation, error
+  handling) correctly, rather than asserting the exact wording the model returns.
+
+
+• Why is it important to run tests yourself before asking the coding agent to fix
+  failures?
+
+  Running tests yourself confirms the failure (and the exact error) and ensures you
+  don't ask the agent to fix something that was a local mistake (e.g. wrong env or
+  wrong branch). You can paste the real failure into the prompt so the agent has
+  accurate information and doesn't "fix" the wrong thing.
+
+
+End-to-End Understanding
+
+• Describe the full request flow for POST /summarize, from HTTP request to response.
+
+  1. Client sends POST /summarize with JSON body (text, optional max_length) and
+     Authorization: Bearer <token>.
+  2. FastAPI parses the body and runs the auth dependency. If the token is missing
+     or invalid, the dependency raises 401 and the response is returned; flow stops.
+  3. Request body is validated against SummarizeRequest (e.g. non-empty text). If
+     invalid, FastAPI returns 422 with validation errors.
+  4. The handler checks OPENROUTER_API_KEY; if missing, it returns 500.
+  5. The handler builds a prompt and sends an HTTP POST to OpenRouter's chat
+     completions API with the key and model from config.
+  6. If the upstream request fails (timeout, error response), the handler returns 503.
+  7. The handler parses the OpenRouter response, extracts the generated text, and
+     optionally truncates it to max_length words. It sets truncated=True if it
+     truncated.
+  8. The handler returns SummarizeResponse (summary, model, truncated) as JSON with
+     status 200.
+
+
+• At what points does non-determinism enter the system?
+
+  Non-determinism enters when the OpenRouter API is called: the model's output can
+  vary for the same prompt (different wording, length, or style). Our code is
+  deterministic up to that call (validation, auth, prompt building) and after
+  (parsing, truncation, response shape). Only the content of the model's reply is
+  non-deterministic.
+
+
+• How does this backend prepare you for building a frontend in the next lab?
+
+  The backend exposes a stable API contract (POST /summarize with request/response
+  schemas and auth). The frontend can be built against that contract: send
+  Authorization: Bearer dev-token, POST JSON with text and max_length, and consume
+  the JSON response (summary, model, truncated). The /health endpoint gives a simple
+  way to check that the backend is running. Having a working, tested backend with
+  clear errors (401, 422, 503) lets the frontend handle those cases and focus on UI
+  and user flow instead of inventing the API.
