@@ -15,6 +15,18 @@ app = FastAPI(title="lab4")
 DEV_TOKEN = "dev-token"
 
 
+@app.on_event("startup")
+def _log_openrouter_status() -> None:
+    import logging
+    if OPENROUTER_API_KEY:
+        ok = "sk-or-" in OPENROUTER_API_KEY[:10]
+        logging.getLogger("uvicorn.access").info(
+            f"OPENROUTER_API_KEY: set, length={len(OPENROUTER_API_KEY)}, looks_valid={ok}"
+        )
+    else:
+        logging.getLogger("uvicorn.access").warning("OPENROUTER_API_KEY: not set")
+
+
 def require_auth(request: Request) -> None:
     """raise 401 if Authorization: Bearer <token> is missing or token is not dev-token."""
     auth = request.headers.get("Authorization")

@@ -14,11 +14,10 @@ services:
   backend:
     build:
       context: ./backend
+    env_file: .env
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     environment:
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://lab7:lab7-password@db:5432/lab7}
     depends_on:
       - db
@@ -28,6 +27,9 @@ services:
       context: ./frontend
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      BACKEND_BASE_URL: http://backend:8000
+      DEV_JWT_TOKEN: ${DEV_JWT_TOKEN:-dev-token}
     depends_on:
       - backend
 

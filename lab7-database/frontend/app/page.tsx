@@ -11,7 +11,7 @@ export default function Home() {
     isLoading,
     input,
     handleInputChange,
-  } = useCompletion();
+  } = useCompletion({ api: "/api/summarize", streamProtocol: "text" });
 
   const [validationError, setValidationError] = useState("");
 
