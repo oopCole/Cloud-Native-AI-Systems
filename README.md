@@ -1,5 +1,6 @@
 # CloudNativeAI
 
+## Code in collaboration with Cursor Agent
 Labs and experiments for cloud-native AI: calling LLMs via OpenRouter and related tooling.
 
 **In the `devtools/` folder:**
