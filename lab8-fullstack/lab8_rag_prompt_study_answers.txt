@@ -1,0 +1,111 @@
+Lab 8 — RAG & prompt engineering study answers (brief)
+Repository layout: lab8-ai (pipeline) + lab8-fullstack (API/UI). Paths below are relative to repo root unless noted.
+
+================================================================================
+A. Prompt engineering (prompt files as artifacts)
+================================================================================
+
+1. Exact paths (prompt files)
+   - lab8-ai/ai_pipeline/prompts/summary.md
+   - lab8-ai/ai_pipeline/prompts/risks.md
+   On this machine (example): …\CloudNativeAI\lab8-ai\ai_pipeline\prompts\
+
+2. summary.md — fixed output structure (sections in order)
+   Use these headings verbatim, each followed by bullets (or the single fallback bullet):
+   - ### 1. Executive overview
+   - ### 2. Financial or operating performance
+   - ### 3. Strategy, outlook, or management emphasis
+   - ### 4. Risks or constraints visible in the EVIDENCE
+   - ### 5. What the EVIDENCE does not establish
+
+3. summary.md — quote prohibiting external knowledge / speculation (one sentence)
+   “Do not use industry norms, other companies, news, capital markets commentary, or general 10-K conventions unless the same wording or idea appears in the EVIDENCE.”
+   (Also: “Do not infer motives, unstated causes, or future outcomes.”)
+
+4. risks.md — required format for each risk item
+   Output is six sections (headings verbatim). Under sections 1–5, each material risk is one markdown bullet (`- …`) with a single discrete risk tied to the EVIDENCE (prose in one bullet, not a separate title/subheading schema). Empty sections use exactly: `- Not addressed in the EVIDENCE.` Section 6 lists coverage limits / what the EVIDENCE does not establish, also as bullets.
+
+5. How prompts load at runtime (file + function)
+   - File: lab8-ai/ai_pipeline/query.py
+   - Function: load_prompt(name: str) reads _PROMPTS_DIR / name via path.read_text(encoding="utf-8").
+   The full-stack backend uses the same helpers via ai_pipeline.service (imports load_prompt, _inject_evidence, _format_evidence_block from query.py).
+
+6. Why changing one line in summary.md changes output without code changes
+   query.py loads the template fresh each run: load_prompt(...) then _inject_evidence(...). The entire markdown (instructions + few-shot + output contract) is sent as the user message to the LLM. Editing summary.md changes that string, so the model’s instructions and constraints change on the next invocation.
+
+7. (Handout ended at “7” with no text.) — Not answered.
+
+================================================================================
+B. In-context learning (few-shot examples)
+================================================================================
+
+1. Where few-shots live; delimiter
+   Both files: section header “## Examples (few-shot; synthetic calibration only)” (risks.md uses the same header text). A horizontal rule `---` separates examples from the “## Output format” block.
+
+2. Count of examples
+   - summary.md: 2 examples (“Example 1 …”, “Example 2 …”).
+   - risks.md: 2 examples.
+
+3. Purpose of few-shots (structure, tone, specificity)
+   Calibrate the model on the exact heading layout, bullet style, use of “Not addressed in the EVIDENCE,” and grounding in labeled `[Evidence chunk n]` blocks—without relying on code to parse the answer.
+
+4. One bias / undesirable copy pattern
+   The model might repeat fictional entities or themes from the examples (e.g. Northbridge Tools, Wisconsin, steel costs; or fleet tracking, FAA, Portland) in a live answer even when absent from real EVIDENCE. The prompts explicitly warn against this (“few-shot bleed-through”).
+
+5. Separating live evidence from few-shots
+   Placeholder at end of each template: <<<EVIDENCE>>> . At runtime, query.py._inject_evidence replaces it once with a block starting with the heading “## EVIDENCE” followed by bodies formatted as “[Evidence chunk i]\n…”. All few-shot text sits above that replacement point in the markdown.
+
+================================================================================
+C. RAG implementation in ingest.py
+================================================================================
+
+1. Input / PDF selection
+   PDFs are read from lab8-ai/data/raw/ (ingest._RAW_DIR = project data/raw). All *.pdf files are collected, sorted; the first PDF in sorted order is ingested (pdfs[0]).
+
+2. PDF → text
+   Library: pypdf (PdfReader). Extraction: extract_pdf_text() in ingest.py — iterates reader.pages, page.extract_text(), joins with “\n\n”.
+
+3. Chunking
+   - Function: chunk_text(text, chunk_size, overlap) — fixed character windows with step (chunk_size - overlap).
+   - Variables: CHUNK_SIZE, CHUNK_OVERLAP (integers; overlap must satisfy 0 <= CHUNK_OVERLAP < CHUNK_SIZE).
+   - Configuration: process environment / .env (read in ingest.main() via os.environ).
+
+4. Metadata per chunk (keys in collection.add metadatas=)
+   - source (PDF filename)
+   - chunk_index (integer index in sequence)
+
+5. Embeddings
+   - Provider: sentence-transformers (lab constraint in ingest).
+   - Model init: SentenceTransformer(embedding_model) in ingest.main() after reading EMBEDDING_MODEL from env; model.encode(batch, normalize_embeddings=True, …).
+
+6. Chroma persistence
+   - Directory: lab8-ai/ai_pipeline/vector_store (_VECTOR_DIR = _PACKAGE_DIR / "vector_store").
+   - Code: chromadb.PersistentClient(path=str(_VECTOR_DIR)); collection.add(...).
+
+7. Bad chunking — a query-time failure mode
+   Example: overlap = 0 can split mid-sentence/mid-table so no single chunk holds a complete claim—retrieval may return fragments and the LLM cannot ground bullets. Very large chunks dilute embedding signal (one vector for many topics), hurting relevance. Missing/unstable chunk IDs would break deduping, updates, and debugging but Chroma still retrieves text; the more visible symptom is usually irrelevant or redundant context in the prompt.
+
+================================================================================
+D. RAG implementation in query.py (retrieval + prompt injection)
+================================================================================
+
+1. top-k
+   Value comes from environment variable RAG_TOP_K (integer), read in query.py main(): top_k = int(os.environ["RAG_TOP_K"].strip()). Example default in .env.example: 6.
+
+2. Query strings embedded for retrieval
+   Defined in query.py as _RETRIEVAL_QUERY dict:
+   - summary: “Business description operations segments products services revenue costs financial results MD&A management discussion analysis strategy outlook executive summary”
+   - risks: “risk factors uncertainties litigation regulatory compliance market competition operational financial liquidity forward-looking statements contingencies material risks”
+   Used as query_text = _RETRIEVAL_QUERY[args.task], then embedder.encode([query_text], …).
+
+3. Injecting chunks into the prompt
+   - Delimiter: placeholder <<<EVIDENCE>>> in the .md template; replaced by “## EVIDENCE\n\n” + formatted chunk text.
+   - Chunk lines: “[Evidence chunk {i}]\n{document text}” from _format_evidence_block.
+   - In query.py CLI path, collection.query uses include=["documents"] only—injected text is document body, not structured metadata (no page numbers in the evidence block from this code path).
+
+4. Irrelevant chunks despite good ingestion
+   - Embedding: a general-purpose sentence model may poorly match financial/10-K phrasing, so cosine neighbors are not the sections a human would pick.
+   - Chunking: oversized chunks mix topics; a single embedding represents multiple themes, so retrieval can pull marginally related passages for the fixed query string.
+
+================================================================================
+End of answers
