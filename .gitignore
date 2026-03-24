@@ -34,3 +34,9 @@ htmlcov/
 
 # mypy
 .mypy_cache/
+
+# Lab 8 – frontend build output, dependencies, local Chroma data
+lab8-fullstack/frontend/node_modules/
+lab8-fullstack/frontend/.next/
+lab8-ai/ai_pipeline/vector_store/
+lab8-ai/data/raw/*.pdf

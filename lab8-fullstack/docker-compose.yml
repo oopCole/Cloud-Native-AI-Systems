@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: lab8
+      POSTGRES_USER: lab8
+      POSTGRES_PASSWORD: lab8-password
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab8 -d lab8"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  backend:
+    build:
+      context: ..
+      dockerfile: lab8-fullstack/backend/Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://lab8:lab8-password@db:5432/lab8
+      LAB8_RAW_DIR: /data/raw
+      LAB8_VECTOR_DIR: /vector/chroma
+      LAB8_ENV_FILE: ""
+      # LLM/OpenRouter vars come only from env_file (.env). Do not use ${VAR} here—an empty
+      # shell var overrides env_file and causes 401 "User not found" from OpenRouter.
+    volumes:
+      - filings_raw:/data/raw
+      - chroma_data:/vector/chroma
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  filings_raw:
+  chroma_data:
